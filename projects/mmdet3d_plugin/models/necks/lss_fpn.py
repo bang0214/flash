@@ -7,6 +7,8 @@ from torch.utils.checkpoint import checkpoint
 from mmcv.cnn.bricks import ConvModule
 from mmdet.models import NECKS
 
+from mmcv.runner import BaseModule, auto_fp16
+from mmdet.models.builder import build_neck
 
 @NECKS.register_module()
 class FPN_LSS(nn.Module):
@@ -18,7 +20,8 @@ class FPN_LSS(nn.Module):
                  norm_cfg=dict(type='BN'),
                  extra_upsample=2,
                  lateral=None,
-                 use_input_conv=False):
+                 use_input_conv=False,
+                 bev_enhance_module=None):
         super(FPN_LSS, self).__init__()
         self.input_feature_index = input_feature_index
         self.extra_upsample = extra_upsample is not None
@@ -55,6 +58,11 @@ class FPN_LSS(nn.Module):
                 nn.ReLU(inplace=True)
             )
 
+        # 添加BEV增强模块支持
+        self.with_bev_enhance = bev_enhance_module is not None
+        if self.with_bev_enhance:
+            self.bev_enhance = build_neck(bev_enhance_module)
+
     def forward(self, feats):
         """
         Args:
@@ -71,6 +79,10 @@ class FPN_LSS(nn.Module):
         x = self.conv(x1)   # (B, C', H, W)
         if self.extra_upsample:
             x = self.up2(x)     # (B, C_out, 2*H, 2*W)
+            
+         # 如果有BEV增强模块，则应用它
+        if self.with_bev_enhance:
+            x = self.bev_enhance(x)
         return x
 
 

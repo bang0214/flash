@@ -1,4 +1,5 @@
 # Copyright (c) Phigent Robotics. All rights reserved.
+from mmdet.models.builder import build_neck
 from ...ops import TRTBEVPoolv2
 from .bevdet import BEVDet
 from .bevdepth import BEVDepth
@@ -11,7 +12,7 @@ from mmdet3d.core import bbox3d2result
 import numpy as np
 from multiprocessing.dummy import Pool as ThreadPool
 from ...ops import nearest_assign
-# pool = ThreadPool(processes=4)  # �����̳߳�
+# pool = ThreadPool(processes=4)  # �����̳߳�
 
 # for pano
 grid_config_occ = {
@@ -78,11 +79,20 @@ class BEVDetOCC(BEVDet):
     def __init__(self,
                  occ_head=None,
                  upsample=False,
+                 bev_attention_module=None, 
                  **kwargs):
         super(BEVDetOCC, self).__init__(**kwargs)
+
+        # 添加注意力增强模块
+        self.with_bev_attention = bev_attention_module is not None
+        if self.with_bev_attention:
+            self.bev_attention_module = build_neck(bev_attention_module)
+
         self.occ_head = build_head(occ_head)
         self.pts_bbox_head = None
         self.upsample = upsample
+
+        
 
     def forward_train(self,
                       points=None,
@@ -131,6 +141,11 @@ class BEVDetOCC(BEVDet):
         mask_camera = kwargs['mask_camera']     # (B, Dx, Dy, Dz)
 
         occ_bev_feature = img_feats[0]
+
+        # 应用BEV注意力增强
+        if self.with_bev_attention:
+            occ_bev_feature = self.bev_attention_module(occ_bev_feature)
+        
         if self.upsample:
             occ_bev_feature = F.interpolate(occ_bev_feature, scale_factor=2,
                                             mode='bilinear', align_corners=True)
@@ -168,7 +183,12 @@ class BEVDetOCC(BEVDet):
         img_feats, _, _ = self.extract_feat(
             points, img_inputs=img, img_metas=img_metas, **kwargs)
 
-        occ_bev_feature = img_feats[0]
+        occ_bev_feature = img_feats[0] 
+
+         # 应用BEV注意力增强
+        if self.with_bev_attention:
+            occ_bev_feature = self.bev_attention_module(occ_bev_feature)
+
         if self.upsample:
             occ_bev_feature = F.interpolate(occ_bev_feature, scale_factor=2,
                                             mode='bilinear', align_corners=True)
@@ -1387,7 +1407,7 @@ class BEVDepthPanoTRT(BEVDepthPano):
         
         # outs_inst_center = self.aux_centerness_head([occ_bev_feature])
         x = self.aux_centerness_head.shared_conv(occ_bev_feature)     # (B, C'=share_conv_channel, H, W)
-        # ���в�ͬtask_head,
+        # ���в�ͬtask_head,
         outs_inst_center_reg = self.aux_centerness_head.task_heads[0].reg(x)
         outs.append(outs_inst_center_reg)
         outs_inst_center_height = self.aux_centerness_head.task_heads[0].height(x)
@@ -1440,7 +1460,7 @@ class BEVDepthPanoTRT(BEVDepthPano):
 
         # outs_inst_center = self.aux_centerness_head([occ_bev_feature])
         x = self.aux_centerness_head.shared_conv(occ_bev_feature)     # (B, C'=share_conv_channel, H, W)
-        # ���в�ͬtask_head,
+        # ���в�ͬtask_head,
         outs_inst_center_reg = self.aux_centerness_head.task_heads[0].reg(x)
         outs.append(outs_inst_center_reg)
         outs_inst_center_height = self.aux_centerness_head.task_heads[0].height(x)
